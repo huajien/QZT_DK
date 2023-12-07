@@ -3,14 +3,11 @@ import json
 import random
 import uuid
 import time
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-
-
+import cv2
+import numpy as np
+from aesEncode import encryptAesEcb, decryptAesEcb
 import base64
-import random
 
-#目前还差验证码坐标获取
 #项目还在调试勿用
 
 
@@ -20,19 +17,7 @@ timestamp_milliseconds = int(current_time_seconds * 1000)
 
 
 
-def encrypt_aes(plaintext, key):
-    aes = AES.new(key, AES.MODE_ECB)
-    padded_data = pad(plaintext, AES.block_size)
-    ciphertext = aes.encrypt(padded_data)
-    encoded_ciphertext = base64.b64encode(ciphertext).decode('utf-8')
-    return encoded_ciphertext
 
-def decrypt_aes(ciphertext, key):
-    aes = AES.new(key, AES.MODE_ECB)
-    encrypted_data = base64.b64decode(ciphertext)
-    decrypted_data = aes.decrypt(encrypted_data)
-    unpadded_data = unpad(decrypted_data, AES.block_size)
-    return unpadded_data.decode("utf-8")
 
 
 def login(phone,passwd,encrypted_token):
@@ -65,8 +50,6 @@ def checkVerification(encryptedVerification,tokenCoordinateByte):
         "pointJson":encryptedVerification,
         "token":tokenCoordinateByte
     }
-    print(encryptedVerification)
-    print(tokenCoordinateByte)
     response = requests.post(url,data=json.dumps(data),headers=headers)
     print(response.json())
     return response.json()
@@ -92,46 +75,33 @@ def captchaGget():
 
 
 returnData = captchaGget()
+def calculateOffset(originalImgBase64, jigsawImgBase64):
+    originalEdge = cv2.Canny(cv2.imdecode(np.frombuffer(base64.b64decode(originalImgBase64), np.uint8), cv2.IMREAD_UNCHANGED), 100, 200)
+    jigsawEdge = cv2.Canny(cv2.imdecode(np.frombuffer(base64.b64decode(jigsawImgBase64), np.uint8), cv2.IMREAD_UNCHANGED), 100, 200)
 
+    _, _, _, offset = cv2.minMaxLoc(cv2.matchTemplate(originalEdge, jigsawEdge, cv2.TM_CCOEFF_NORMED))
+    offset = offset[0]
+    return f"{offset:.14f}"
 
-
-# 给定的密文和密钥
-# ciphertext = b"ZKHO/QX3AL4R/7tTthmTvI0L5369XzpCKx30VBE9kg0="
-# ciphertext = b"Jw/34CLVbYs/BoPuVAsQl8pVz8FZ2oUGdSgLC0ouFVGQjzEvu8G73hzClOfS8oo2"
-ciphertext = b"yJ9ZFg2+Ug6B52s99hijHtKYJtRHxDolHCtIsRxbEtY="
-key = b"0Ry4Rnby1JT0050j"
-print(1)
-print(decrypt_aes(ciphertext,key))
-
-
-# coordinateBytes = json.dumps({"x": random.uniform(140, 230), "y": 5})
-coordinateBytes = json.dumps({"x": random.uniform(140, 230), "y": 5}, separators=(',', ':')).encode('utf-8')
-
-print(2)
-print(coordinateBytes)
-# tokenCoordinateBytes = (returnData["repData"]["token"] + "---" + coordinateBytes).encode('utf-8')
-tokenCoordinateBytes = (returnData["repData"]["token"] + "---" + coordinateBytes.decode('utf-8')).encode('utf-8')
-
-# print("token")
-# print(tokenCoordinateBytes)
 
 secretKeyBytes = returnData["repData"]["secretKey"].encode('utf-8')
-# print("key")
-# print(secretKeyBytes)
-encryptedVerification = encrypt_aes(tokenCoordinateBytes, secretKeyBytes)
-
-encryptedTokenVerification = encrypt_aes(tokenCoordinateBytes, secretKeyBytes)
-# print("密文")
+token = returnData["repData"]["token"].encode('utf-8')
+originalImgBase64 = returnData["repData"]["originalImageBase64"]
+jigsawImgBase64 = returnData["repData"]["jigsawImageBase64"]
 
 
-print(coordinateBytes)
-tokenCoordinateByte = returnData["repData"]["token"]
+xOffsetResult = calculateOffset(originalImgBase64,jigsawImgBase64)
+coordinateBytes = json.dumps({"x": xOffsetResult, "y": 5}, separators=(',', ':'))
 
+tokenCoordinateBytes = (token.decode('utf-8') + "---" + coordinateBytes).encode('utf-8')
+
+
+encryptedVerification = encryptAesEcb(coordinateBytes.encode("utf-8"), secretKeyBytes)
+# print(encryptedVerification)
+captchaVerification = encryptAesEcb(tokenCoordinateBytes, secretKeyBytes)
 # 验证码验证
-checkVerification(encryptedVerification,tokenCoordinateByte)
-# 登录
+checkVerification(encryptedVerification,token.decode('utf-8'))
 
-phone = 11111111111111111
-passwd = 1234567
-# login(phone,passwd,encryptedTokenVerification)
-
+phone = 10000000000000
+passwd = "12345678"
+login(phone,passwd,captchaVerification)
